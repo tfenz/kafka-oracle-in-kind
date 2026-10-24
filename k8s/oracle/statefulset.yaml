@@ -1,0 +1,90 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: oracle
+spec:
+  serviceName: oracle
+  replicas: 1
+  selector:
+    matchLabels:
+      app: oracle
+  template:
+    metadata:
+      labels:
+        app: oracle
+    spec:
+      terminationGracePeriodSeconds: 120
+      securityContext:
+        runAsUser: 54321
+        runAsGroup: 54321
+        fsGroup: 54321
+      imagePullSecrets:
+        - name: oracle-registry
+      containers:
+        - name: oracle
+          image: container-registry.oracle.com/database/enterprise:19.3.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: listener
+              containerPort: 1521
+          env:
+            - name: ORACLE_SID
+              value: ORCLCDB
+            - name: ORACLE_PDB
+              value: ORCLPDB1
+            - name: ORACLE_CHARACTERSET
+              value: AL32UTF8
+            - name: ORACLE_EDITION
+              value: enterprise
+            - name: ENABLE_ARCHIVELOG
+              value: "true"
+            - name: AUTO_MEM_CALCULATION
+              value: "false"
+            - name: ORACLE_PWD
+              valueFrom:
+                secretKeyRef:
+                  name: oracle-credentials
+                  key: ORACLE_PWD
+            - name: DEMO_PWD
+              valueFrom:
+                secretKeyRef:
+                  name: oracle-credentials
+                  key: DEMO_PWD
+          resources:
+            requests:
+              cpu: "1"
+              memory: 3Gi
+            limits:
+              memory: 6Gi
+          readinessProbe:
+            exec:
+              command: ["/bin/sh", "-c", "/opt/oracle/checkDBStatus.sh"]
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 30
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - echo "SHUTDOWN IMMEDIATE" | sqlplus -s / as sysdba
+          volumeMounts:
+            - name: oradata
+              mountPath: /opt/oracle/oradata
+            - name: setup-scripts
+              mountPath: /opt/oracle/scripts/setup
+            - name: dshm
+              mountPath: /dev/shm
+      volumes:
+        - name: oradata
+          persistentVolumeClaim:
+            claimName: oracle-oradata
+        - name: setup-scripts
+          configMap:
+            name: oracle-setup-scripts
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 2Gi

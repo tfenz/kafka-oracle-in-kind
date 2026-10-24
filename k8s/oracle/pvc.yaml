@@ -1,0 +1,13 @@
+# Holds datafiles, online redo logs (/opt/oracle/oradata/<SID>/redo*.log) and the
+# archive logs (/opt/oracle/oradata/fast_recovery_area). Kind is single-node, so a
+# CDC reader such as OpenLogReplicator can mount this RWO claim (read-only) as well.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: oracle-oradata
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 50Gi
