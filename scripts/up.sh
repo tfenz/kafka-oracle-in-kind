@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Spins up a Kind cluster with Strimzi, single-node Kafka, AKHQ and Oracle 19c.
+# Spins up Kind with Strimzi, Kafka, Schema Registry, AKHQ and Oracle 19c.
 #
 # Usage: scripts/up.sh [--skip-oracle] [--no-wait]
 set -euo pipefail
@@ -43,6 +43,11 @@ install_strimzi() {
 deploy_kafka() {
   log "Deploying Kafka cluster '${KAFKA_CLUSTER}'"
   "${KUBECTL[@]}" -n "${KAFKA_NAMESPACE}" apply -f "${ROOT_DIR}/k8s/kafka/kafka.yaml"
+}
+
+deploy_schema_registry() {
+  log "Deploying Confluent Schema Registry"
+  "${KUBECTL[@]}" -n "${KAFKA_NAMESPACE}" apply -f "${ROOT_DIR}/k8s/schema-registry/schema-registry.yaml"
 }
 
 deploy_akhq() {
@@ -111,11 +116,13 @@ wait_for_oracle() {
 create_cluster
 install_strimzi
 deploy_kafka
+deploy_schema_registry
 deploy_akhq
 [[ "${SKIP_ORACLE}" == true ]] || deploy_oracle
 
 if [[ "${WAIT}" == true ]]; then
   wait_for_kafka
+  "${KUBECTL[@]}" -n "${KAFKA_NAMESPACE}" rollout status deployment/schema-registry --timeout=600s
   "${KUBECTL[@]}" -n "${KAFKA_NAMESPACE}" rollout status deployment/akhq --timeout=300s
   [[ "${SKIP_ORACLE}" == true ]] || wait_for_oracle
 fi
@@ -126,6 +133,8 @@ $(log "Done")
   kubectl context : ${KUBE_CONTEXT}
   Kafka (in-cluster): ${KAFKA_CLUSTER}-kafka-bootstrap.${KAFKA_NAMESPACE}.svc:9092
   Kafka (host)      : 127.0.0.1:9092
+  Schema Registry  : http://schema-registry.${KAFKA_NAMESPACE}.svc:8081 (in-cluster)
+  kubectl --context ${KUBE_CONTEXT} -n ${KAFKA_NAMESPACE} port-forward --address 127.0.0.1 svc/schema-registry 8081:8081
   AKHQ             : http://127.0.0.1:8080 (after running the port-forward below)
   kubectl --context ${KUBE_CONTEXT} -n ${KAFKA_NAMESPACE} port-forward --address 127.0.0.1 svc/akhq 8080:8080
 EOF

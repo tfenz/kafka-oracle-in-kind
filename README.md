@@ -7,6 +7,7 @@ It spins up a [Kind](https://kind.sigs.k8s.io/) cluster with:
 |-----------|---------|
 | [Strimzi](https://strimzi.io/) operator | `1.3.0`, namespace `kafka` |
 | Kafka cluster `cdc-cluster` | Kafka `4.3.1`, KRaft, 1 dual-role node |
+| Confluent Schema Registry | `8.3.2`, namespace `kafka` |
 | [AKHQ](https://akhq.io/) | `0.28.0`, Kafka web UI, namespace `kafka` |
 | Oracle Database | `19.3.0.0` Enterprise, namespace `oracle`, CDB `ORCLCDB`, PDB `ORCLPDB1` |
 
@@ -47,9 +48,9 @@ The Oracle image is pulled from the Oracle Container Registry, which requires a 
 ## Usage
 
 ```bash
-./scripts/up.sh                # Kind + Strimzi + Kafka + AKHQ + Oracle
-./scripts/up.sh --skip-oracle  # Kafka + AKHQ, without Oracle
-./scripts/up.sh --no-wait      # don't wait for Kafka/AKHQ/Oracle readiness
+./scripts/up.sh                # Kind + Strimzi + Kafka + Schema Registry + AKHQ + Oracle
+./scripts/up.sh --skip-oracle  # Kafka + Schema Registry + AKHQ, without Oracle
+./scripts/up.sh --no-wait      # don't wait for application readiness
 ./scripts/down.sh              # delete the cluster (all data is lost)
 ```
 
@@ -75,6 +76,7 @@ kubectl --context kind-kafka-oracle -n oracle logs -f oracle-0
 | | In-cluster | From host |
 |-|-----------|-----------|
 | Kafka | `cdc-cluster-kafka-bootstrap.kafka.svc:9092` | `127.0.0.1:9092` |
+| Schema Registry | `http://schema-registry.kafka.svc:8081` | `http://127.0.0.1:8081` (port-forward) |
 | Oracle PDB | `oracle.oracle.svc:1521/ORCLPDB1` | `127.0.0.1:1521/ORCLPDB1` |
 | Oracle CDB | `oracle.oracle.svc:1521/ORCLCDB` | `127.0.0.1:1521/ORCLCDB` |
 
@@ -91,7 +93,26 @@ kubectl --context kind-kafka-oracle -n kafka port-forward --address 127.0.0.1 sv
 
 AKHQ has no authentication in this local test setup. Its Service is cluster-internal;
 the port-forward binds only to the loopback address. No cluster recreation is needed.
-Kafka Connect and Schema Registry connections are not configured.
+Schema Registry is connected to AKHQ for schema browsing and message decoding.
+Kafka Connect is not configured.
+
+### Schema Registry
+
+The single Confluent Schema Registry instance uses the internal Kafka listener.
+Schemas are stored in Kafka's compacted `_schemas` topic with replication factor 1;
+no separate PVC or ZooKeeper is needed. Schema data survives a Registry pod restart,
+but deleting the Kind cluster deletes Kafka data and schemas.
+
+For host access, keep this command running in a separate terminal:
+
+```bash
+kubectl --context kind-kafka-oracle -n kafka port-forward --address 127.0.0.1 svc/schema-registry 8081:8081
+```
+
+Then list subjects with `curl --fail http://127.0.0.1:8081/subjects`.
+In-cluster CDC clients should use `http://schema-registry.kafka.svc:8081`.
+This local setup uses HTTP without authentication and a cluster-internal Service;
+the port-forward binds only to loopback.
 
 ### Client examples
 
@@ -110,6 +131,7 @@ kubectl --context kind-kafka-oracle -n oracle exec -it oracle-0 -- sqlplus demo/
 kind/cluster.yaml            Kind cluster + host port mappings (1521, 9092, 9093)
 k8s/kafka/kafka.yaml         KafkaNodePool + Kafka (internal + NodePort listeners)
 k8s/akhq/akhq.yaml           AKHQ Deployment + internal Service
+k8s/schema-registry/        Confluent Schema Registry Deployment + internal Service
 k8s/oracle/                  Kustomize: namespace, PVC, services, StatefulSet, setup script
 scripts/up.sh | down.sh      lifecycle scripts (settings in scripts/common.sh)
 ```
